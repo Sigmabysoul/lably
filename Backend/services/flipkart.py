@@ -3,7 +3,7 @@ import io
 import re
 from typing import List, Optional
 
-import fitz  # PDF ko edit karne ke liye PyMuPDF library
+import pymupdf  # PDF ko edit karne ke liye PyMuPDF library
 import barcode  # Barcode images generate karne ke liye
 from barcode.writer import ImageWriter  # Barcode ko image format me likhnay ke liye
 from PIL import Image  # Image processing aur manipulation ke liye
@@ -53,7 +53,7 @@ def generate_barcode_bytes(
 
 def _sized_barcode_bytes(
     data: str,
-    target_rect: "fitz.Rect",
+    target_rect: "pymupdf.Rect",
     *,
     module_height: float,
     min_module_width: float = 0.50,
@@ -98,7 +98,7 @@ def _sized_barcode_bytes(
     )
 
 
-def _find_card_x_bounds(page: "fitz.Page", anchors: List["fitz.Rect"]) -> "tuple[float, float]":
+def _find_card_x_bounds(page: "pymupdf.Page", anchors: List["pymupdf.Rect"]) -> "tuple[float, float]":
     """Original Flipkart label ka left aur right border find karta hai."""
     default = (0.0, page.rect.width)
     if not anchors:
@@ -117,7 +117,7 @@ def _find_card_x_bounds(page: "fitz.Page", anchors: List["fitz.Rect"]) -> "tuple
         rect = d.get("rect")
         if rect is None:
             continue
-        rect = fitz.Rect(rect)
+        rect = pymupdf.Rect(rect)
 
         # Bahut chhoti lines aur almost full-page drawings ko ignore karo.
         if rect.width < 100 or rect.width > page.rect.width * 0.95:
@@ -136,7 +136,7 @@ def _find_card_x_bounds(page: "fitz.Page", anchors: List["fitz.Rect"]) -> "tuple
     return best.x0, best.x1
 
 
-def _find_card_bottom(page: "fitz.Page", band: "fitz.Rect") -> float:
+def _find_card_bottom(page: "pymupdf.Page", band: "pymupdf.Rect") -> float:
     """Is label ka actual bottom border dhoondta hai taaki divider bahar na nikle."""
     try:
         drawings = page.get_drawings()
@@ -148,7 +148,7 @@ def _find_card_bottom(page: "fitz.Page", band: "fitz.Rect") -> float:
         rect = d.get("rect")
         if rect is None:
             continue
-        rect = fitz.Rect(rect)
+        rect = pymupdf.Rect(rect)
 
         # Label ka outer rectangle usually band ke andar hota hai aur kaafi wide hota hai.
         if abs(rect.x0 - band.x0) > 1.5 or abs(rect.x1 - band.x1) > 1.5:
@@ -167,7 +167,7 @@ def _find_card_bottom(page: "fitz.Page", band: "fitz.Rect") -> float:
     return max(r.y1 for r in candidates)
 
 
-def _find_label_bands(page: "fitz.Page") -> List["fitz.Rect"]:
+def _find_label_bands(page: "pymupdf.Page") -> List["pymupdf.Rect"]:
     anchors = page.search_for("Handle with care")
     anchors.sort(key=lambda r: r.y0)
     if not anchors:
@@ -177,7 +177,7 @@ def _find_label_bands(page: "fitz.Page") -> List["fitz.Rect"]:
 
     page_h = page.rect.height
     heights: List[float] = []
-    bands: List["fitz.Rect"] = []
+    bands: List["pymupdf.Rect"] = []
 
     for i, anchor in enumerate(anchors):
         top = max(0, anchor.y0 - 25)
@@ -188,19 +188,19 @@ def _find_label_bands(page: "fitz.Page") -> List["fitz.Rect"]:
             # Last label ke liye pehle labels ki average height use karo.
             typical = sum(heights) / len(heights) if heights else 320.0
             bottom = min(page_h, top + typical)
-        bands.append(fitz.Rect(left, top, right, bottom))
+        bands.append(pymupdf.Rect(left, top, right, bottom))
 
     return bands
 
 
-def _extract_box_id(page: "fitz.Page", band: "fitz.Rect") -> Optional[str]:
+def _extract_box_id(page: "pymupdf.Page", band: "pymupdf.Rect") -> Optional[str]:
     """PDF page ke specific band se Box ID extract karta hai."""
     text = page.get_text("text", clip=band)  # Band ke andar se text nikaalte hain
     match = BOX_ID_PATTERN.search(text)  # Box ID pattern se match dhundho
     return match.group(0) if match else None  # Match mila to return karo, nahi to None
 
 
-def _extract_box_name(page: "fitz.Page", band: "fitz.Rect", anchor: "fitz.Rect") -> str:
+def _extract_box_name(page: "pymupdf.Page", band: "pymupdf.Rect", anchor: "pymupdf.Rect") -> str:
     """Box Name text ko anchor ke bagal se extract karta hai."""
     words = page.get_text("words", clip=band)  # Band ke sare words nikaalte hain
     parts: List[str] = []
@@ -220,21 +220,21 @@ def _extract_box_name(page: "fitz.Page", band: "fitz.Rect", anchor: "fitz.Rect")
     return " ".join(parts)  # Sab parts ko space se join karke return karo
 
 
-def _find_count_text(page: "fitz.Page", band: "fitz.Rect") -> str:
+def _find_count_text(page: "pymupdf.Page", band: "pymupdf.Rect") -> str:
     """Box count text dhundo ([1 of 5] jaisa)."""
     text = page.get_text("text", clip=band)  # Band se complete text nikalo
     match = COUNT_PATTERN.search(text)  # Count pattern se match dhundo
     return match.group(0) if match else ""  # Match mila to return karo, nahi to empty string
 
 
-def _pad(rect: "fitz.Rect", amount: float) -> "fitz.Rect":
+def _pad(rect: "pymupdf.Rect", amount: float) -> "pymupdf.Rect":
     """Rectangle ke sab sides se equal amount by cutting karta hai (padding/margin)."""
-    return fitz.Rect(rect.x0 + amount, rect.y0 + amount, rect.x1 - amount, rect.y1 - amount)
+    return pymupdf.Rect(rect.x0 + amount, rect.y0 + amount, rect.x1 - amount, rect.y1 - amount)
 
 
 def _process_label_band(
-    page: "fitz.Page",
-    band: "fitz.Rect",
+    page: "pymupdf.Page",
+    band: "pymupdf.Rect",
     box_id_override: Optional[str],
     consignment_id: str,
     consignment_barcode_bytes: bytes,
@@ -267,7 +267,7 @@ def _process_label_band(
     if box_bottom - box_top < 20:
         return
 
-    box_rect = fitz.Rect(band.x0 + 8, box_top, band.x1 - 8, box_bottom)
+    box_rect = pymupdf.Rect(band.x0 + 8, box_top, band.x1 - 8, box_bottom)
 
     # Label ka asli bottom dhoondo. Isse vertical line label ke bahar nahi jayegi.
     card_bottom = _find_card_bottom(page, band)
@@ -287,7 +287,7 @@ def _process_label_band(
     if cons_bottom - cons_top < 28:
         cons_bottom = cons_top + 28
 
-    consignment_rect = fitz.Rect(
+    consignment_rect = pymupdf.Rect(
         band.x0 + 8,
         cons_top,
         band.x1 - 8,
@@ -297,7 +297,7 @@ def _process_label_band(
     # Purane Box ID aur Address aur Consignment wale generated parts ko white karke clean area banao.
     page.add_redact_annot(box_rect, fill=(1, 1, 1))
     # Address section ko puraa clean karo (full width)
-    addr_and_cons_rect = fitz.Rect(band.x0 + 8, from_caption.y0 - 2, band.x1 - 8, card_bottom - 4)
+    addr_and_cons_rect = pymupdf.Rect(band.x0 + 8, from_caption.y0 - 2, band.x1 - 8, card_bottom - 4)
     page.add_redact_annot(addr_and_cons_rect, fill=(1, 1, 1))
     page.add_redact_annot(consignment_rect, fill=(1, 1, 1))
     page.apply_redactions()
@@ -315,7 +315,7 @@ def _process_label_band(
 
     # Box ID ki length ke hisaab se font size adjust karo taaki text fit ho jaye
     box_id_fontsize = 11 if len(current_box_id) <= 24 else 9
-    label_w = fitz.get_text_length("Box ID", fontname="hebo", fontsize=label_fontsize)  # Label width calculate karo
+    label_w = pymupdf.get_text_length("Box ID", fontname="hebo", fontsize=label_fontsize)  # Label width calculate karo
     page.insert_text(
         (inner.x0 + label_w + 10, inner.y0 + label_fontsize),
         current_box_id,
@@ -324,7 +324,7 @@ def _process_label_band(
     )
 
     if count_text:
-        count_w = fitz.get_text_length(count_text, fontname="helv", fontsize=10)
+        count_w = pymupdf.get_text_length(count_text, fontname="helv", fontsize=10)
         page.insert_text(
             (inner.x1 - count_w, inner.y0 + label_fontsize),
             count_text,
@@ -333,7 +333,7 @@ def _process_label_band(
         )
 
     box_name_fontsize = 10
-    bn_label_w = fitz.get_text_length("Box Name", fontname="hebo", fontsize=box_name_fontsize)
+    bn_label_w = pymupdf.get_text_length("Box Name", fontname="hebo", fontsize=box_name_fontsize)
     page.insert_text(
         (inner.x0, inner.y1 - 3),
         "Box Name",
@@ -358,7 +358,7 @@ def _process_label_band(
         mid = (inner.y0 + inner.y1) / 2
         barcode_top, barcode_bottom = mid - 4, mid + 4
 
-    barcode_rect = fitz.Rect(inner.x0, barcode_top, inner.x1, barcode_bottom)
+    barcode_rect = pymupdf.Rect(inner.x0, barcode_top, inner.x1, barcode_bottom)
     box_barcode_bytes = _sized_barcode_bytes(
         current_box_id,
         barcode_rect,
@@ -385,7 +385,7 @@ def _process_label_band(
     # Consignment section ko clean rakhne ke liye barcode full width me rakhenge.
     # Barcode ko available full width denge.
     barcode_side_gap = 6.0
-    barcode_rect = fitz.Rect(
+    barcode_rect = pymupdf.Rect(
         consignment_rect.x0 + barcode_side_gap,
         consignment_rect.y0 + 5,
         consignment_rect.x1 - barcode_side_gap,
@@ -418,12 +418,12 @@ def _process_label_band(
     available_text_width = consignment_rect.width - 12
     cons_fontsize = 9.0
     while cons_fontsize > 7.0:
-        test_label_width = fitz.get_text_length(
+        test_label_width = pymupdf.get_text_length(
             label_text,
             fontname="hebo",
             fontsize=cons_fontsize,
         )
-        test_id_width = fitz.get_text_length(
+        test_id_width = pymupdf.get_text_length(
             consignment_id,
             fontname="helv",
             fontsize=cons_fontsize,
@@ -435,12 +435,12 @@ def _process_label_band(
     text_y = barcode_rect.y1 + cons_fontsize + 4
 
     # Label ko bold aur ID ko normal rakhne ke liye dono alag draw kar rahe hain.
-    label_width = fitz.get_text_length(
+    label_width = pymupdf.get_text_length(
         label_text,
         fontname="hebo",
         fontsize=cons_fontsize,
     )
-    id_width = fitz.get_text_length(
+    id_width = pymupdf.get_text_length(
         consignment_id,
         fontname="helv",
         fontsize=cons_fontsize,
@@ -465,7 +465,7 @@ def _process_label_band(
     )
 
 
-def _detect_consignment_id(doc: "fitz.Document") -> Optional[str]:
+def _detect_consignment_id(doc: "pymupdf.Document") -> Optional[str]:
     """Poore PDF me se Consignment ID automatically detect karta hai.
     
     Same Consignment ID sab labels par hoti hai,
@@ -504,7 +504,7 @@ def process_flipkart_pdf(
     if not contents:
         raise ValueError("PDF contents are empty.")
     try:
-        doc = fitz.open(stream=contents, filetype="pdf")  # PDF ko memory me open karo
+        doc = pymupdf.open(stream=contents, filetype="pdf")  # PDF ko memory me open karo
     except Exception as exc:  # pragma: no cover - defensive validation guard
         raise ValueError("Invalid PDF contents provided.") from exc
 
