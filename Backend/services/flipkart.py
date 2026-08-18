@@ -1,67 +1,80 @@
-# Flipkart PDF label processing ke liye zaruri libraries import kar rahe hain
+# ============================================
+# Flipkart PDF Label Processing Module
+# Ye module Flipkart ke PDF labels ko process karta hai
+# aur unme barcode aur information add karta hai
+# ============================================
+
 import io
 import re
 from typing import List, Optional
 
-import pymupdf  # PDF ko edit karne ke liye PyMuPDF library
-import barcode  # Barcode images generate karne ke liye
-from barcode.writer import ImageWriter  # Barcode ko image format me likhnay ke liye
-from PIL import Image  # Image processing aur manipulation ke liye
+import pymupdf  # PyMuPDF - PDF manipulation ke liye
+import barcode
+from barcode.writer import ImageWriter
+from PIL import Image
 
-# Flipkart labels me used patterns ke liye regex define kar rahe hain
-BOX_ID_PATTERN = re.compile(r"fk_mp_\d+_\d+")  # Box ID pattern: fk_mp_123_456
-CONSIGNMENT_ID_PATTERN = re.compile(r"fk_mp_\d+(?!_\d)")  # Consignment ID pattern: fk_mp_123
-COUNT_PATTERN = re.compile(r"\[\s*\d+\s+of\s+\d+\s*\]")  # Box count pattern: [1 of 5]
+# Regex patterns - ye patterns specific text ko PDF mein dhundne ke liye use hote hain
+BOX_ID_PATTERN = re.compile(r"fk_mp_\d+_\d+")  # Box ID ko dhundne ke liye pattern
+CONSIGNMENT_ID_PATTERN = re.compile(r"fk_mp_\d+(?!_\d)")  # Consignment ID pattern
+COUNT_PATTERN = re.compile(r"\[\s*\d+\s+of\s+\d+\s*\]")  # Item count pattern jaise [1 of 5]
 
-# Label par text ke liye colors define kar rahe hain (RGB tuple)
-NAVY = (0.08, 0.10, 0.35)  # Navy blue color label heading ke liye
-GREY = (0.55, 0.55, 0.55)  # Grey color dividing lines ke liye
+# Colors - RGB format mein define kiye gaye
+NAVY = (0.08, 0.10, 0.35)  # Neela rang - text aur borders ke liye
+GREY = (0.55, 0.55, 0.55)   # Dhusara rang - divider lines ke liye
 
-# Address bahut lamba ho tab bhi Consignment ID ke liye minimum jagah rakho (points me)
-MIN_CONSIGNMENT_WIDTH = 90.0
+MIN_CONSIGNMENT_WIDTH = 90.0  # Consignment ID ke liye minimum width
 
+
+# ============================================
+# Barcode generation functions
+# Barcode generate karne ke liye ye functions use hote hain
+# ============================================
 
 def generate_barcode_bytes(
     data: str,
-    module_height: float = 22.0,
+    module_height: float = 15.0,
     font_size: int = 9,
     write_text: bool = True,
     module_width: float = 0.34,
 ) -> bytes:
-    """Diye gaye data ke liye Code128 barcode image bytes generate karta hai.
+    # Barcode generate karne ke liye ye function hai
+    # Input: data (jinhe barcode mein encode karna hai)
+    # Output: bytes mein barcode image
     
-    Module height se barcode ka height decide hota hai,
-    aur module width se barcode ki thickness decide hoti hai.
-    """
-    # Code128 barcode image banate hain
-    code128 = barcode.get_barcode_class("code128")
-    writer = ImageWriter()
+    code128 = barcode.get_barcode_class("code128")  # Code128 format ka barcode
+    writer = ImageWriter()  # Image format mein likne ke liye
+    
+    # Barcode ke options - dimensions aur styling
     options = {
-        "module_width": module_width,
-        "module_height": module_height,
-        "quiet_zone": 1.5,
-        "font_size": font_size,
-        "text_distance": 3.0,
-        "write_text": write_text,
-        "dpi": 300,
+        "module_width": module_width,      # Barcode ki width
+        "module_height": module_height,    # Barcode ki height
+        "quiet_zone": 1.5,                 # Barcode ke aas-paas white space
+        "font_size": font_size,            # Text ka font size
+        "text_distance": 3.0,              # Text se barcode tak distance
+        "write_text": write_text,          # Text display karega ya nahi
+        "dpi": 300,                        # Print quality (300 DPI)
     }
+    
+    # BytesIO buffer mein barcode likho
     buffer = io.BytesIO()
     code128(data, writer=writer).write(buffer, options=options)
-    buffer.seek(0)
-    return buffer.getvalue()
+    buffer.seek(0)  # Buffer ke shuruat par jaao
+    return buffer.getvalue()  # Barcode ke bytes return karo
 
 
 def _sized_barcode_bytes(
     data: str,
-    target_rect: "pymupdf.Rect",
+    target_rect: "pymupdf.Rect",  # Ye rectangle batata hai ki barcode kitin bada hona chahiye
     *,
     module_height: float,
-    min_module_width: float = 0.50,
+    min_module_width: float = 0.5,
     max_module_width: float = 1.8,
     write_text: bool = False,
     font_size: int = 0,
 ) -> bytes:
-    """Target area ke ratio ke hisaab se barcode ki width adjust karta hai."""
+    # Ye function barcode ko target rectangle mein fit karta hai
+    # Barcode ko resize karta hai taaki wo box mein acha se aaye
+    # Pehle ek standard barcode banao (baseline)
     baseline_width = 0.34
     baseline = generate_barcode_bytes(
         data,
@@ -70,25 +83,30 @@ def _sized_barcode_bytes(
         font_size=font_size,
         module_width=baseline_width,
     )
-
-    # Agar area invalid hai to normal barcode hi use karo.
+    
+    # Agar target rectangle invalid hai to baseline return karo
     if target_rect.width <= 0 or target_rect.height <= 0:
         return baseline
 
+    # Baseline barcode ki dimensions check karo
     with Image.open(io.BytesIO(baseline)) as img:
-        baseline_aspect = img.width / img.height
+        baseline_aspect = img.width / img.height  # Aspect ratio (width/height)
 
     if baseline_aspect <= 0:
         return baseline
 
-    # Target ke width/height aur barcode ke ratio se best module width nikaalo.
+    # Target rectangle ka aspect ratio calculate karo
     target_aspect = target_rect.width / target_rect.height
+    # Module width ko target se match karane ke liye adjust karo
     module_width = baseline_width * (target_aspect / baseline_aspect)
+    # Width ko min aur max boundaries mein rakho
     module_width = max(min_module_width, min(max_module_width, module_width))
 
+    # Agar width mein koi change nahi hai to baseline return karo
     if abs(module_width - baseline_width) < 1e-3:
         return baseline
 
+    # Naya sized barcode generate karo
     return generate_barcode_bytes(
         data,
         module_height=module_height,
@@ -98,421 +116,370 @@ def _sized_barcode_bytes(
     )
 
 
+def _find_card_bounds_for_anchor(page: "pymupdf.Page", anchor: "pymupdf.Rect") -> Optional["pymupdf.Rect"]:
+    # Ye function anchor ke aas-paas card ka rectangular boundary dhundta hai
+    # Jab 'Handle with care' text mil jaaye tab use anchor mante hain
+    
+    probe_top = anchor.y0 - 30      # Anchor se 30 units upar dekho
+    probe_bottom = anchor.y0 + 350  # Anchor se 350 units neeche dekho
+    try:
+        # Page se sab drawings (rectangles) nikalo
+        drawings = page.get_drawings()
+    except Exception:
+        return None  # Agar error aaye to None return karo
+
+    # Valid card boundaries ko collect karo
+    candidates = []
+    for d in drawings:
+        rect = d.get("rect")
+        if rect is None:
+            continue
+        
+        r = pymupdf.Rect(rect)
+        
+        # Size check - bohat chhota ya bohat bada rectangle reject karo
+        if r.width < 100 or r.width > page.rect.width * 0.98:
+            continue
+        if r.height < 100:
+            continue
+        
+        # Position check - anchor ke kareeb wala hi chahiye
+        if r.y0 > probe_bottom or r.y1 < probe_top:
+            continue
+        
+        candidates.append(r)
+
+    if not candidates:
+        return None
+
+    # Sabse bada area wala rectangle choose karo (wo card boundary hoga)
+    return max(candidates, key=lambda r: r.width * r.height)
+
+
 def _find_card_x_bounds(page: "pymupdf.Page", anchors: List["pymupdf.Rect"]) -> "tuple[float, float]":
-    """Original Flipkart label ka left aur right border find karta hai."""
-    default = (0.0, page.rect.width)
+    # Card ke left aur right boundaries dhundna
+    # Return: (left_x, right_x) tuple
+    
+    default = (0.0, page.rect.width)  # Default: pura page width
     if not anchors:
         return default
 
-    probe_top = anchors[0].y0
-    probe_bottom = anchors[0].y0 + 400
+    # Pehle anchor se card boundary dhundho
+    card_rect = _find_card_bounds_for_anchor(page, anchors[0])
+    if card_rect:
+        return card_rect.x0, card_rect.x1  # Card ka left aur right edge return karo
 
-    try:
-        drawings = page.get_drawings()
-    except Exception:
-        return default
-
-    candidates = []
-    for d in drawings:
-        rect = d.get("rect")
-        if rect is None:
-            continue
-        rect = pymupdf.Rect(rect)
-
-        # Bahut chhoti lines aur almost full-page drawings ko ignore karo.
-        if rect.width < 100 or rect.width > page.rect.width * 0.95:
-            continue
-        if rect.height < 100:
-            continue
-        if rect.y0 > probe_bottom or rect.y1 < probe_top:
-            continue
-        candidates.append(rect)
-
-    if not candidates:
-        return default
-
-    # Sabse wide matching drawing ko label border maan lo.
-    best = max(candidates, key=lambda r: r.width)
-    return best.x0, best.x1
-
-
-def _find_card_bottom(page: "pymupdf.Page", band: "pymupdf.Rect") -> float:
-    """Is label ka actual bottom border dhoondta hai taaki divider bahar na nikle."""
-    try:
-        drawings = page.get_drawings()
-    except Exception:
-        return band.y1
-
-    candidates = []
-    for d in drawings:
-        rect = d.get("rect")
-        if rect is None:
-            continue
-        rect = pymupdf.Rect(rect)
-
-        # Label ka outer rectangle usually band ke andar hota hai aur kaafi wide hota hai.
-        if abs(rect.x0 - band.x0) > 1.5 or abs(rect.x1 - band.x1) > 1.5:
-            continue
-        if rect.height < 100:
-            continue
-        if rect.y0 < band.y0 - 2 or rect.y0 > band.y1 + 2:
-            continue
-        candidates.append(rect)
-
-    if not candidates:
-        # Safe fallback: band ke bottom se thoda pehle ruk jao.
-        return max(band.y0 + 20, band.y1 - 8)
-
-    # Sabse relevant outer card ka bottom use karo.
-    return max(r.y1 for r in candidates)
+    return default
 
 
 def _find_label_bands(page: "pymupdf.Page") -> List["pymupdf.Rect"]:
+    # Page mein sab labels ke rectangles dhundna
+    # Har label 'Handle with care' text se start hota hai
+    
+    # 'Handle with care' text ke positions dhundho
     anchors = page.search_for("Handle with care")
-    anchors.sort(key=lambda r: r.y0)
+    anchors.sort(key=lambda r: r.y0)  # Top se neeche ke order mein sort karo
+    
     if not anchors:
-        return [page.rect]
+        return [page.rect]  # Agar koi label nahi mila to pura page return karo
 
+    # Card ke boundaries (left aur right x coordinates) dhundho
     left, right = _find_card_x_bounds(page, anchors)
 
+    # Page height aur band heights track karo
     page_h = page.rect.height
-    heights: List[float] = []
-    bands: List["pymupdf.Rect"] = []
-
+    heights: List[float] = []  # Har band ki height store karenge
+    bands: List[pymupdf.Rect] = []  # Final bands ka list
+    
     for i, anchor in enumerate(anchors):
-        top = max(0, anchor.y0 - 25)
-        if i + 1 < len(anchors):
-            bottom = anchors[i + 1].y0 - 25
-            heights.append(bottom - top)
+        # Anchor ke aas-paas card boundary dhundho
+        card_rect = _find_card_bounds_for_anchor(page, anchor)
+        
+        if card_rect is not None:
+            bands.append(card_rect)  # Agar card mila to use karo
         else:
-            # Last label ke liye pehle labels ki average height use karo.
-            typical = sum(heights) / len(heights) if heights else 320.0
-            bottom = min(page_h, top + typical)
-        bands.append(pymupdf.Rect(left, top, right, bottom))
-
-    return bands
+            # Agar card nahi mila to manual estimate karo
+            top = max(0, anchor.y0 - 25)  # Anchor se 25 units upar
+            
+            if i + 1 < len(anchors):
+                # Agar agle anchor hai to uske aas tak band extend karo
+                bottom = anchors[i + 1].y0 - 25
+                heights.append(bottom - top)  # Height store karo
+            else:
+                # Last label - typical height use karo
+                typical = sum(heights) / len(heights) if heights else 320.0
+                bottom = min(page_h, top + typical)
+            
+            bands.append(pymupdf.Rect(left, top, right, bottom))
+    
+    return bands  # Sab bands return karo
 
 
 def _extract_box_id(page: "pymupdf.Page", band: "pymupdf.Rect") -> Optional[str]:
-    """PDF page ke specific band se Box ID extract karta hai."""
-    text = page.get_text("text", clip=band)  # Band ke andar se text nikaalte hain
-    match = BOX_ID_PATTERN.search(text)  # Box ID pattern se match dhundho
-    return match.group(0) if match else None  # Match mila to return karo, nahi to None
+    # Band se Box ID extract karo (fk_mp_XXXX_XXXX format)
+    
+    text = page.get_text("text", clip=band)  # Band ke andar ka text nikalo
+    match = BOX_ID_PATTERN.search(text)      # Regex se Box ID dhundho
+    return match.group(0) if match else None  # Agar mila to return karo, nahi to None
 
 
 def _extract_box_name(page: "pymupdf.Page", band: "pymupdf.Rect", anchor: "pymupdf.Rect") -> str:
-    """Box Name text ko anchor ke bagal se extract karta hai."""
-    words = page.get_text("words", clip=band)  # Band ke sare words nikaalte hain
+    # Box Name extract karo - ye 'Box Name' ke baad wala text hota hai
+    
+    words = page.get_text("words", clip=band)  # Band ke andar sab words nikalo
     parts: List[str] = []
-
+    
     for x0, y0, _x1, _y1, text, *_rest in words:
-        # Anchor ke vertical range me hi text dhundho
+        # Position check - anchor ke kareeb ke words hi le sakte ho
         if y0 < anchor.y0 - 2 or y0 > anchor.y1 + 14:
             continue
-        # Anchor ke right side se text lo, uske baad wale
+        
+        # Anchor ke right side se hi text chahiye (Box Name anchor ke aage hota hai)
         if x0 <= anchor.x1 + 2:
             continue
-        # Box ID aur count text ko skip karo
+        
+        # Box ID aur Count ko skip karo - sirf Box Name chahiye
         if BOX_ID_PATTERN.fullmatch(text) or COUNT_PATTERN.fullmatch(text):
             continue
+        
         parts.append(text)
-
+    
     return " ".join(parts)  # Sab parts ko space se join karke return karo
 
 
 def _find_count_text(page: "pymupdf.Page", band: "pymupdf.Rect") -> str:
-    """Box count text dhundo ([1 of 5] jaisa)."""
-    text = page.get_text("text", clip=band)  # Band se complete text nikalo
-    match = COUNT_PATTERN.search(text)  # Count pattern se match dhundo
-    return match.group(0) if match else ""  # Match mila to return karo, nahi to empty string
+    # Band se count text dhundho (jaise '[1 of 5]')
+    
+    text = page.get_text("text", clip=band)  # Band ka text nikalo
+    match = COUNT_PATTERN.search(text)       # Regex se count pattern dhundho
+    return match.group(0) if match else ""   # Agar mila to return karo, nahi to empty string
 
 
 def _pad(rect: "pymupdf.Rect", amount: float) -> "pymupdf.Rect":
-    """Rectangle ke sab sides se equal amount by cutting karta hai (padding/margin)."""
+    # Rectangle ko chhota karo (sabhi sides se padding add karo)
+    # Ye content ke liye inner space banane ke liye use hota hai
     return pymupdf.Rect(rect.x0 + amount, rect.y0 + amount, rect.x1 - amount, rect.y1 - amount)
 
 
 def _process_label_band(
     page: "pymupdf.Page",
-    band: "pymupdf.Rect",
-    box_id_override: Optional[str],
-    consignment_id: str,
-    consignment_barcode_bytes: bytes,
+    band: "pymupdf.Rect",        # Process karne wala label band
+    box_id_override: Optional[str],  # Agar manually box_id dena hai
+    consignment_id: str,         # Consignment ID likhi hogi
 ) -> None:
-    cid_hits = page.search_for("Consignment ID", clip=band)
-    box_id_hits = page.search_for("Box ID", clip=band)
-    box_name_hits = page.search_for("Box Name", clip=band)
-    from_hits = page.search_for("From:", clip=band)
-
+    # Ye function ek label band ko process karta hai
+    # Box ID aur Consignment ID ke barcode aur information add karta hai
+    
+    # Required labels ko search karo
+    cid_hits = page.search_for("Consignment ID", clip=band)  # Consignment ID label dhundho
+    box_id_hits = page.search_for("Box ID", clip=band)       # Box ID label dhundho
+    box_name_hits = page.search_for("Box Name", clip=band)   # Box Name label dhundho
+    from_hits = page.search_for("From:", clip=band)          # From: label dhundho
+    
+    # Agar koi label nahi mila to ye band skip karo
     if not cid_hits or not box_id_hits or not box_name_hits or not from_hits:
-        # Layout match na ho to label ko skip karo, taaki galat jagah erase na ho.
         return
 
+    # Labels ke positions (rectangles) store karo
     cid_caption = cid_hits[0]
     box_id_caption = box_id_hits[0]
     box_name_caption = box_name_hits[0]
     from_caption = from_hits[0]
 
+    # Box ID nikalo - override diya hai to wo use karo, nahi to extract karo
     current_box_id = box_id_override or _extract_box_id(page, band)
     if not current_box_id:
-        return
-
+        return  # Agar box_id nahi mila to band skip karo
+    
+    # Aur information extract karo
     box_name_text = _extract_box_name(page, band, box_name_caption)
     count_text = _find_count_text(page, band)
 
-    # Box ID wale section ki jagah nikaal rahe hain.
-    # Yahan sirf redaction hoga; koi naya outer box draw nahi karna hai.
+    # Box ke boundaries determine karo
     box_top = min(cid_caption.y0, box_id_caption.y0) - 8
-    box_bottom = from_caption.y0 - 8
+    box_bottom = from_caption.y0 - 6
+    
+    # Agar box ka height bohat kam hai to valid nahi hai
     if box_bottom - box_top < 20:
         return
-
+    
+    # Box ke liye rectangle banao
     box_rect = pymupdf.Rect(band.x0 + 8, box_top, band.x1 - 8, box_bottom)
 
-    # Label ka asli bottom dhoondo. Isse vertical line label ke bahar nahi jayegi.
-    card_bottom = _find_card_bottom(page, band)
+    # Address ke dimensions dhundho taaki consignment area properly place ho
+    from_block = pymupdf.Rect(band.x0, from_caption.y0 - 2, band.x1, band.y1)
+    addr_words = page.get_text("words", clip=from_block)
+    addr_right_edge = max((w[2] for w in addr_words), default=band.x0 + 220)
 
-    # Address section full width lega
-    # From: section se neeche tak address ke liye jagah nikaalo.
-    addr_top = from_caption.y0 - 2
-    addr_bottom = card_bottom - 4
-    
-    # Consignment section ko address ke neeche rakhenge (nahi right side me)
-    # Pehle half address ko, doosra half Consignment ke liye
-    mid_point = (addr_top + addr_bottom) / 2
-    
-    # Consignment section neeche rakhenge
-    cons_top = mid_point + 5
-    cons_bottom = card_bottom - 4
-    if cons_bottom - cons_top < 28:
-        cons_bottom = cons_top + 28
+    # Consignment area ke left boundary decide karo
+    if band.x1 - (addr_right_edge + 16) < MIN_CONSIGNMENT_WIDTH:
+        # Agar space kam hai to 32% width allocate karo
+        consignment_left = band.x1 - (band.width * 0.32)
+    else:
+        # Address ke aage space rakho
+        consignment_left = addr_right_edge + 16
 
-    consignment_rect = pymupdf.Rect(
-        band.x0 + 8,
-        cons_top,
-        band.x1 - 8,
-        cons_bottom,
-    )
+    # Divider line ki position
+    divider_x = consignment_left - 6
+    cons_top = box_bottom + 6
+    # Border se 3pt andar tak - taaki border cut na ho
+    cons_bottom = band.y1 - 3
+    consignment_rect = pymupdf.Rect(consignment_left, cons_top, band.x1 - 3, cons_bottom)
 
-    # Purane Box ID aur Address aur Consignment wale generated parts ko white karke clean area banao.
+    # Purane content ko white color se cover karo (redact karo)
     page.add_redact_annot(box_rect, fill=(1, 1, 1))
-    # Address section ko puraa clean karo (full width)
-    addr_and_cons_rect = pymupdf.Rect(band.x0 + 8, from_caption.y0 - 2, band.x1 - 8, card_bottom - 4)
-    page.add_redact_annot(addr_and_cons_rect, fill=(1, 1, 1))
     page.add_redact_annot(consignment_rect, fill=(1, 1, 1))
-    page.apply_redactions()
+    page.apply_redactions()  # Apply karo
 
-    # Box ID text ko original style me wapas draw karo, lekin outer border bilkul mat draw karo.
-    inner = _pad(box_rect, 6)
-    label_fontsize = 11
-    page.insert_text(
-        (inner.x0, inner.y0 + label_fontsize),
-        "Box ID",
-        fontsize=label_fontsize,
-        fontname="hebo",
-        color=NAVY,
-    )
+    # ============================================
+    # Box ID Box banao
+    # ============================================
+    page.draw_rect(box_rect, color=NAVY, width=1.2)  # Neela rectangle draw karo
 
-    # Box ID ki length ke hisaab se font size adjust karo taaki text fit ho jaye
-    box_id_fontsize = 11 if len(current_box_id) <= 24 else 9
-    label_w = pymupdf.get_text_length("Box ID", fontname="hebo", fontsize=label_fontsize)  # Label width calculate karo
+    inner = _pad(box_rect, 6)  # Inner space banao (padding ke saath)
+    
+    # 'Box ID' label likho
+    label_fontsize = 9.5
+    page.insert_text((inner.x0, inner.y0 + label_fontsize), "Box ID", fontsize=label_fontsize, fontname="hebo", color=NAVY)
+    
+    # Box ID text likho (font size adjust karo agar ID lambi ho)
+    box_id_fontsize = 9.5 if len(current_box_id) <= 24 else 8.5
+    label_w = pymupdf.get_text_length("Box ID", fontname="hebo", fontsize=label_fontsize)
     page.insert_text(
-        (inner.x0 + label_w + 10, inner.y0 + label_fontsize),
+        (inner.x0 + label_w + 8, inner.y0 + label_fontsize),
         current_box_id,
         fontsize=box_id_fontsize,
         fontname="helv",
     )
-
+    # Agar count hai to right side mein likho
     if count_text:
-        count_w = pymupdf.get_text_length(count_text, fontname="helv", fontsize=10)
+        count_w = pymupdf.get_text_length(count_text, fontname="helv", fontsize=9.0)
         page.insert_text(
-            (inner.x1 - count_w, inner.y0 + label_fontsize),
+            (inner.x1 - count_w, inner.y0 + label_fontsize),  # Right aligned
             count_text,
-            fontsize=10,
+            fontsize=9.0,
             fontname="helv",
         )
 
-    box_name_fontsize = 10
+    # 'Box Name' label likho - bottom mein
+    box_name_fontsize = 9.0
     bn_label_w = pymupdf.get_text_length("Box Name", fontname="hebo", fontsize=box_name_fontsize)
-    page.insert_text(
-        (inner.x0, inner.y1 - 3),
-        "Box Name",
-        fontsize=box_name_fontsize,
-        fontname="hebo",
-        color=NAVY,
-    )
-
+    page.insert_text((inner.x0, inner.y1 - 2), "Box Name", fontsize=box_name_fontsize, fontname="hebo", color=NAVY)
+    
+    # Box Name text likho
     if box_name_text:
         page.insert_text(
-            (inner.x0 + bn_label_w + 10, inner.y1 - 3),
+            (inner.x0 + bn_label_w + 8, inner.y1 - 2),
             box_name_text,
             fontsize=box_name_fontsize,
             fontname="helv",
         )
 
-    # Box ID barcode ka size aur placement ko untouched rakha gaya hai.
+    # Box ID ka barcode banao aur insert karo
     barcode_top = inner.y0 + label_fontsize + 6
     barcode_bottom = inner.y1 - box_name_fontsize - 6
+    
+    # Agar space kam hai to center mein barcode rakhho
     if barcode_bottom - barcode_top < 8:
-        # Bahut kam jagah ho to safe fallback use karo.
         mid = (inner.y0 + inner.y1) / 2
         barcode_top, barcode_bottom = mid - 4, mid + 4
-
+    
     barcode_rect = pymupdf.Rect(inner.x0, barcode_top, inner.x1, barcode_bottom)
     box_barcode_bytes = _sized_barcode_bytes(
         current_box_id,
         barcode_rect,
         module_height=26.0,
     )
-    page.insert_image(barcode_rect, stream=box_barcode_bytes, keep_proportion=True)
+    page.insert_image(barcode_rect, stream=box_barcode_bytes, keep_proportion=True)  # Image insert karo
 
-    # Horizontal divider Box ID section ke baad
+    # ============================================
+    # Divider Lines draw karo
+    # ============================================
+    # Box aur Consignment section ke beech horizontal line
     page.draw_line(
-        (band.x0 + 8, box_bottom + 5),
-        (band.x1 - 8, box_bottom + 5),
-        color=GREY,
-        width=0.8,
+        (band.x0 + 8, box_bottom + 4), (band.x1 - 8, box_bottom + 4), color=GREY, width=0.8
     )
-
-    # Horizontal divider Address section ke baad (neeche)
+    # Box aur Consignment ke beech vertical divider line
     page.draw_line(
-        (band.x0 + 8, mid_point),
-        (band.x1 - 8, mid_point),
-        color=GREY,
-        width=0.8,
+        (divider_x, box_bottom + 8), (divider_x, band.y1 - 3), color=GREY, width=0.8
     )
 
-    # Consignment section ko clean rakhne ke liye barcode full width me rakhenge.
-    # Barcode ko available full width denge.
-    barcode_side_gap = 6.0
-    barcode_rect = pymupdf.Rect(
-        consignment_rect.x0 + barcode_side_gap,
-        consignment_rect.y0 + 5,
-        consignment_rect.x1 - barcode_side_gap,
-        consignment_rect.y0 + 28,
-    )
-
-    # Barcode ko target width ke hisaab se dobara generate kar rahe hain,
-    # taaki image patli na lage aur available jagah properly use ho.
-    clean_consignment_barcode = _sized_barcode_bytes(
-        consignment_id,
-        barcode_rect,
-        module_height=14.0,
-        min_module_width=0.22,
-        max_module_width=1.0,
-        write_text=False,
-        font_size=0,
-    )
-
-    page.insert_image(
-        barcode_rect,
-        stream=clean_consignment_barcode,
-        keep_proportion=True,
-    )
-
-    # Consignment ID ko barcode ke neeche rakhenge
-    # Font size taaki text fit ho jaye
+    # ============================================
+    # Consignment ID Section
+    # ============================================
     cons_fontsize = 9.0
-    label_text = "Consignment ID"
-    # Available width se check karo fit hota hai ya nahi
-    available_text_width = consignment_rect.width - 12
-    cons_fontsize = 9.0
-    while cons_fontsize > 7.0:
-        test_label_width = pymupdf.get_text_length(
-            label_text,
-            fontname="hebo",
-            fontsize=cons_fontsize,
-        )
-        test_id_width = pymupdf.get_text_length(
-            consignment_id,
-            fontname="helv",
-            fontsize=cons_fontsize,
-        )
-        if test_label_width + 6.0 + test_id_width <= available_text_width:
-            break
-        cons_fontsize -= 0.25
-
-    text_y = barcode_rect.y1 + cons_fontsize + 4
-
-    # Label ko bold aur ID ko normal rakhne ke liye dono alag draw kar rahe hain.
-    label_width = pymupdf.get_text_length(
-        label_text,
-        fontname="hebo",
-        fontsize=cons_fontsize,
-    )
-    id_width = pymupdf.get_text_length(
-        consignment_id,
-        fontname="helv",
-        fontsize=cons_fontsize,
-    )
-    gap = 6.0
-    combined_width = label_width + gap + id_width
-    # Left side se start karo (nahi center me)
-    text_x = consignment_rect.x0 + 6.0
-
+    
+    # 'Consignment ID' label likho
     page.insert_text(
-        (text_x, text_y),
-        label_text,
+        (consignment_rect.x0, consignment_rect.y0 + cons_fontsize + 2),
+        "Consignment ID",
         fontsize=cons_fontsize,
         fontname="hebo",
         color=NAVY,
     )
+    
+    # Consignment ID number likho
+    cons_label_w = pymupdf.get_text_length("Consignment ID", fontname="hebo", fontsize=cons_fontsize)
     page.insert_text(
-        (text_x + label_width + gap, text_y),
+        (consignment_rect.x0 + cons_label_w + 6, consignment_rect.y0 + cons_fontsize + 2),
         consignment_id,
         fontsize=cons_fontsize,
         fontname="helv",
     )
 
+    # Consignment ID ka barcode banao aur insert karo
+    # Maximum width aur height use karo
+    cb_top = consignment_rect.y0 + cons_fontsize + 10
+    cb_bottom = consignment_rect.y1 - 20
+    consignment_barcode_rect = pymupdf.Rect(
+        consignment_rect.x0, cb_top, band.x1 - 5, cb_bottom
+    )
+
+    consignment_barcode_bytes = _sized_barcode_bytes(
+        consignment_id,
+        consignment_barcode_rect,
+        module_height=28.0,
+        min_module_width=0.25,
+        max_module_width=0.9,
+        write_text=False,  # Text nahi likho, sirf barcode
+    )
+    page.insert_image(
+        consignment_barcode_rect, stream=consignment_barcode_bytes, keep_proportion=True
+    )
+
 
 def _detect_consignment_id(doc: "pymupdf.Document") -> Optional[str]:
-    """Poore PDF me se Consignment ID automatically detect karta hai.
+    # PDF document mein Consignment ID dhundho
+    # Ye fk_mp_XXXX format mein hota hai
     
-    Same Consignment ID sab labels par hoti hai,
-    to sirf pehla match return karte hain.
-    """
-    for page in doc:  # Har page ke liye
-        match = CONSIGNMENT_ID_PATTERN.search(page.get_text())  # Consignment ID dhundo
+    for page in doc:
+        match = CONSIGNMENT_ID_PATTERN.search(page.get_text())
         if match:
-            return match.group(0)  # Pehla match mil gaya to return karo
-    return None  # Pura PDF scan kar liye aur nahi mila
+            return match.group(0)  # Pehla match return karo
+    
+    return None  # Agar nahi mila to None return karo
 
 
 def process_flipkart_pdf(
-    contents: bytes,
-    box_id: Optional[str] = None,
-    consignment_id: Optional[str] = None,
-    from_address: Optional[str] = None,
+    contents: bytes,                           # PDF file ke bytes
+    box_id: Optional[str] = None,             # Optional: manually box ID dena
+    consignment_id: Optional[str] = None,     # Optional: manually consignment ID dena
+    from_address: Optional[str] = None,       # Optional: address info (abhi use nahi ho raha)
 ) -> io.BytesIO:
-    """Flipkart PDF ko process karta hai: Box ID aur Consignment ID update karta hai.
+    # ============================================
+    # Main function - Flipkart PDF ko process karne ke liye
+    # Input: PDF bytes
+    # Output: Modified PDF ke bytes (io.BytesIO format mein)
+    # ============================================
+    
+    # PDF ko open karo
+    doc = pymupdf.open(stream=contents, filetype="pdf")
 
-    The `from_address` argument is accepted for API compatibility with the
-    FastAPI route and any frontend payloads that include a sender address.
-
-    Args:
-        contents: PDF file ke bytes
-        box_id: Manual Box ID (optional - auto-detect hota hai)
-        consignment_id: Consignment ID (optional - auto-detect hota hai)
-        from_address: Sender address for label generation (optional)
-
-    Returns:
-        Modified PDF as BytesIO stream
-    """
-    # The legacy implementation here doesn't currently render a sender address,
-    # but the parameter must be accepted to avoid 500 errors from the API route.
-    _ = from_address
-    if not contents:
-        raise ValueError("PDF contents are empty.")
-    try:
-        doc = pymupdf.open(stream=contents, filetype="pdf")  # PDF ko memory me open karo
-    except Exception as exc:  # pragma: no cover - defensive validation guard
-        raise ValueError("Invalid PDF contents provided.") from exc
-
-    # Agar Consignment ID diya nahi gaya to PDF se dhundo
+    # Consignment ID automatically detect karo agar nahi diya hai
     if not consignment_id:
         consignment_id = _detect_consignment_id(doc)
-
-    # Agar ab bhi nahi mila to error do
+    
+    # Agar abhi bhi consignment ID nahi mila to error throw karo
     if not consignment_id:
         doc.close()
         raise ValueError(
@@ -521,35 +488,26 @@ def process_flipkart_pdf(
             "in the expected fk_mp_<digits> format."
         )
 
-    # Consignment barcode har label par same hota hai
-    # Actual size aur width label ke andar target rect ke hisaab se set hogi
-    consignment_barcode_bytes = generate_barcode_bytes(
-        consignment_id,
-        module_height=14.0,
-        font_size=0,
-        write_text=False,
-        module_width=0.34,
-    )
-
     # Har page ko process karo
     for page in doc:
-        bands = _find_label_bands(page)  # Page se sab label bands dhundo
-        for band in bands:  # Har band ke liye
-            # Sirf ek label ho to manually diya gaya Box ID use karo
+        # Page mein se label bands dhundho
+        bands = _find_label_bands(page)
+        
+        for band in bands:
+            # Agar sirf ek band hai aur box_id diya hai to use karo
             band_box_id = box_id if (box_id and len(bands) == 1) else None
-
-            # Label band ko update karo: Box ID aur Consignment ID likhao
+            
+            # Label band ko process karo - barcode aur info add karo
             _process_label_band(
                 page,
                 band,
                 band_box_id,
                 consignment_id,
-                consignment_barcode_bytes,
             )
 
-    # Modified PDF ko output buffer me save karo
+    # Modified PDF ko save karo
     out_buffer = io.BytesIO()
-    doc.save(out_buffer, garbage=4, deflate=True)  # File size reduce karne ke liye compress karo
-    doc.close()  # PDF document ko close karo
-    out_buffer.seek(0)  # Buffer ko start se read karne ke liye position set karo
+    doc.save(out_buffer, garbage=4, deflate=True)  # Compress bhi karo
+    doc.close()
+    out_buffer.seek(0)
     return out_buffer  # Modified PDF return karo
