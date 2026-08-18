@@ -1,0 +1,9 @@
+fastapi; 
+uvicorn;
+PyMuPDF;
+pypdf;
+reportlab;
+python-multipart;
+PyMuPDF;
+python-barcode;
+pillow
