@@ -25,6 +25,8 @@ export type LabelRecord = {
 }
 
 export function extractFlipkartLabels(text: string, pageIndex: number) {
+  if (!text.trim()) return []
+
   const consignmentMatches = [...text.matchAll(/\bfk_[a-z0-9]+_\d+\b/gi)].map((match) => match[0])
   const boxMatches = [...text.matchAll(/\bfk_[a-z0-9]+_\d+_\d+\b/gi)].map((match) => match[0])
   const labelMatches = [...text.matchAll(/\[\s*(\d+)\s+of\s+(\d+)\s*\]/gi)].map((match) => `[${match[1]} of ${match[2]}]`)
