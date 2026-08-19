@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from services.amazon import process_amazon_pdf
 from services.flipkart import process_flipkart_pdf
+from services.crop import crop_flipkart_pdf
 
 app = FastAPI(title="LabelCode API")
 
@@ -63,31 +64,42 @@ async def process_flipkart(
     box_id: Optional[str] = Form(None),
     consignment_id: Optional[str] = Form(None),
     from_address: Optional[str] = Form(None),   # ← NEW: sender address
+    crop_padding: Optional[float] = Form(None),  # white space (pt) around each cropped label
 ):
     """
     Process a Flipkart shipping label PDF.
 
-    - Crops 2-per-page layouts into individual label pages automatically.
     - Auto-detects Box ID and Consignment ID from the PDF.
     - Inserts the From address into the blank section of each label.
-    - Returns the processed PDF as a download.
+    - Once flipkart.py is done rearranging the sheet, hands the result to
+      crop.py, which splits the 2-per-page layout into individual label
+      pages with white padding on every side.
+    - Returns the final, cropped PDF as a download.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a PDF.")
 
     try:
         contents = await file.read()
-        output = process_flipkart_pdf(
+        rearranged = process_flipkart_pdf(
             contents,
             box_id=box_id or None,
             consignment_id=consignment_id or None,
             from_address=from_address or None,
         )
 
-        if isinstance(output, (bytes, bytearray)):
-            output = io.BytesIO(output)
+        if isinstance(rearranged, (bytes, bytearray)):
+            rearranged_bytes = bytes(rearranged)
         else:
-            output.seek(0)
+            rearranged.seek(0)
+            rearranged_bytes = rearranged.read()
+
+        # flipkart.py's rearranging pass is done - now crop.py splits the
+        # sheet into one page per label, with white padding all around.
+        output = crop_flipkart_pdf(
+            rearranged_bytes,
+            **({"padding": crop_padding} if crop_padding is not None else {}),
+        )
 
         return StreamingResponse(
             output,
