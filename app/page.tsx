@@ -1,7 +1,7 @@
-// Frontend UI component - Next.js me run hota hai (client-side)
+// Frontend UI component - runs client-side in Next.js
 'use client'
 
-// React hooks ko import kar rahe hain
+// Import React hooks
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Boxes,
@@ -30,24 +30,24 @@ import {
   type ProcessingMode,
 } from '@/lib/label-processing'
 
-// Unique ID generate karne wala function
+// Generate a unique ID
 function createId(): string {
-  // Browser ka crypto API use karo agar available ho
+  // Use the browser crypto API when available
   if (
     typeof window !== 'undefined' &&
     window.crypto &&
     typeof window.crypto.randomUUID === 'function'
   ) {
-    return window.crypto.randomUUID()  // Proper UUID generate ho
+    return window.crypto.randomUUID()  // Generate a proper UUID
   }
-  // Fallback: timestamp + random string combine karo
+  // Fallback: combine a timestamp and random string
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 }
 
-// Backend API ki base URL (env se ya default)
+// Backend API base URL (from the environment or the default)
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// Demo data - jab app pehli baar load ho
+// Demo data - loaded when the app starts for the first time
 
 interface FlipkartPanelProps {
   labels: FlipkartLabel[]
@@ -138,8 +138,8 @@ export default function Page() {
     { label: 'Failed', value: stats.failed, Icon: X },
   ]
 
-  // Amazon PDF ko pair-by-pair read aur parse karta hai.
-  // Har shipping page + invoice page pair ko UI me ek independent row milti hai.
+  // Read and parse the Amazon PDF pair by pair.
+  // Each shipping page and invoice page pair gets an independent UI row.
   async function readAmazon(file: File): Promise<AmazonQueueRow[]> {
     try {
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
@@ -149,7 +149,7 @@ export default function Page() {
         data: new Uint8Array(await file.arrayBuffer()),
       }).promise
 
-      // Backend bhi Amazon PDFs ko 2-page pairs me process karta hai:
+      // The backend also processes Amazon PDFs in two-page pairs:
       // shipping label (odd page) + invoice label (even page).
       const pageTexts: string[] = []
       for (let i = 0; i < pdf.numPages; i++) {
@@ -267,26 +267,26 @@ export default function Page() {
     }
   }
 
-  // Flipkart PDF file ko read aur parse karne wala function
+  // Read and parse a Flipkart PDF file
   async function readFlipkart(
     file: File
   ): Promise<{ file: File; extracted: FlipkartLabel[] }> {
     try {
-      // PDF.js library dynamically load karo
+      // Load the PDF.js library dynamically
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-      // Worker script ko explicitly set karo (Next.js me runtime issues avoid karne ke liye)
+      // Set the worker script explicitly to avoid Next.js runtime issues
       pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
-      // PDF ko memory me load karo (file bytes se)
+      // Load the PDF into memory from the file bytes
       const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
-      const extracted: FlipkartLabel[] = []  // Extracted labels yahan store karengy
+      const extracted: FlipkartLabel[] = []  // Store extracted labels here
       
-      // Har page ko process karo
+      // Process every page
       for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex++) {
-        const page = await pdf.getPage(pageIndex + 1)  // Page ko index se fetch karo
-        const content = await page.getTextContent()  // Page ka text extract karo
-        const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')  // Text ko join karo
-        extracted.push(...extractFlipkartLabels(text, pageIndex))  // Labels extract karke add karo
+        const page = await pdf.getPage(pageIndex + 1)  // Fetch the page by index
+        const content = await page.getTextContent()  // Extract the page text
+        const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')  // Join the text
+        extracted.push(...extractFlipkartLabels(text, pageIndex))  // Extract and add labels
       }
       return { file, extracted }
     } catch (err) {
@@ -309,131 +309,131 @@ export default function Page() {
     }
   }
 
-  // Multiple PDF files ko handle karne wala function
+  // Handle multiple PDF files
   async function handleFiles(files: FileList | File[]) {
-    // Sirf PDF files filter karo
+    // Filter for PDF files only
     const pdfs = Array.from(files).filter(
       (file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     )
-    if (!pdfs.length) return  // Koi PDF nahi, to return karo
-    setIsProcessing(true)  // Loading state set karo
+    if (!pdfs.length) return  // Return when there are no PDFs
+    setIsProcessing(true)  // Set the loading state
 
     try {
       if (mode === 'flipkart') {
-        // Flipkart mode: sab files ko parse karo
+        // Flipkart mode: parse all files
         const all: FlipkartLabel[] = []
         for (const file of pdfs) {
-          const res = await readFlipkart(file)  // Har file ko parse karo
-          all.push(...res.extracted)  // Extracted labels collect karo
+          const res = await readFlipkart(file)  // Parse each file
+          all.push(...res.extracted)  // Collect extracted labels
         }
-        setFlipkartFile(pdfs[0])  // First file store karo
-        setFlipkartRows(all)  // Sab labels set karo
+        setFlipkartFile(pdfs[0])  // Store the first file
+        setFlipkartRows(all)  // Set all labels
       } else {
-        // Amazon mode: har PDF ko parse karke har 2-page pair ko separate UI row banao.
+        // Amazon mode: parse each PDF and create a separate UI row for every two-page pair.
         const parsedFiles = await Promise.all(pdfs.map(readAmazon))
         const results = parsedFiles.flat()
         setRows(results)
         if (results.length > 0) {
-          setSelectedId(results[0].id)  // Pehla result select karo
+          setSelectedId(results[0].id)  // Select the first result
         }
       }
     } catch (err) {
-      console.error('Batch file handling error:', err)  // Error log karo
+      console.error('Batch file handling error:', err)  // Log the error
     } finally {
-      setIsProcessing(false)  // Loading state off karo
+      setIsProcessing(false)  // Clear the loading state
     }
   }
 
-  // Drag over handler - drop zone ko highlight karne ke liye
+  // Drag-over handler - highlight the drop zone
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()  // Default behavior ko roko
-    e.stopPropagation()  // Event propagation band karo
+    e.preventDefault()  // Prevent the default behavior
+    e.stopPropagation()  // Stop event propagation
   }
 
-  // Drop handler - files ko handle karo
+  // Drop handler - process the files
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()  // Default behavior ko roko
-    e.stopPropagation()  // Event propagation band karo
+    e.preventDefault()  // Prevent the default behavior
+    e.stopPropagation()  // Stop event propagation
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files)  // Dropped files ko process karo
+      handleFiles(e.dataTransfer.files)  // Process the dropped files
     }
   }
 
-  // Flipkart PDF ko backend se process karke download karne wala function
+  // Process a Flipkart PDF through the backend and download it
   async function downloadFlipkart() {
-    if (!flipkartFile) return  // Agar file nahi hai
-    setIsProcessing(true)  // Processing state on karo
+    if (!flipkartFile) return  // Return when there is no file
+    setIsProcessing(true)  // Enable the processing state
     try {
-      // API ke liye form data prepare karo
+      // Prepare form data for the API
       const formData = new FormData()
-      formData.append('file', flipkartFile)  // PDF file add karo
-      if (manualBox) formData.append('box_id', manualBox)  // Manual Box ID ho to add karo
-      if (manualConsignment) formData.append('consignment_id', manualConsignment)  // Manual Consignment ID ho to add karo
+      formData.append('file', flipkartFile)  // Add the PDF file
+      if (manualBox) formData.append('box_id', manualBox)  // Add the manual Box ID when provided
+      if (manualConsignment) formData.append('consignment_id', manualConsignment)  // Add the manual Consignment ID when provided
 
-      // Backend API ko POST request bhejo
+      // Send a POST request to the backend API
       const response = await fetch(`${API_BASE_URL}/api/process-flipkart`, {
         method: 'POST',
         body: formData,
       })
 
-      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Error check karo
+      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Check for errors
 
-      const blob = await response.blob()  // Response ko blob me convert karo
-      downloadBlob(blob, `flipkart-modified-${flipkartFile.name}`)  // Download karo
+      const blob = await response.blob()  // Convert the response to a blob
+      downloadBlob(blob, `flipkart-modified-${flipkartFile.name}`)  // Download the result
     } catch (error) {
-      console.error('Error processing Flipkart label:', error)  // Error log karo
-      alert('Failed to connect to processing backend. Check API endpoint.')  // User ko alert karo
+      console.error('Error processing Flipkart label:', error)  // Log the error
+      alert('Failed to connect to processing backend. Check API endpoint.')  // Alert the user
     } finally {
-      setIsProcessing(false)  // Processing state off karo
+      setIsProcessing(false)  // Disable the processing state
     }
   }
 
-  // Amazon PDF ko backend se process karke download karne wala function
+  // Process an Amazon PDF through the backend and download it
   async function downloadAmazon() {
-    if (!selected || !selected.file || selected.file.size === 0) return  // Validation check karo
-    setIsProcessing(true)  // Processing state on karo
+    if (!selected || !selected.file || selected.file.size === 0) return  // Validate the selected file
+    setIsProcessing(true)  // Enable the processing state
     try {
-      // API ke liye form data prepare karo
+      // Prepare form data for the API
       const formData = new FormData()
-      formData.append('file', selected.file)  // PDF file add karo
+      formData.append('file', selected.file)  // Add the PDF file
       if (selected.productCode) {
-        formData.append('sku_code', selected.productCode)  // Product code/SKU add karo
+        formData.append('sku_code', selected.productCode)  // Add the product code/SKU
       }
 
-      // Backend API ko POST request bhejo
+      // Send a POST request to the backend API
       const response = await fetch(`${API_BASE_URL}/api/process-amazon`, {
         method: 'POST',
         body: formData,
       })
 
-      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Error check karo
+      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Check for errors
 
-      const blob = await response.blob()  // Response ko blob me convert karo
-      downloadBlob(blob, `modified-${selected.fileName}`)  // Download karo
+      const blob = await response.blob()  // Convert the response to a blob
+      downloadBlob(blob, `modified-${selected.file.name}`)  // Download the result
     } catch (error) {
-      console.error('Error processing Amazon label:', error)  // Error log karo
-      alert('Failed to connect to processing backend. Check API endpoint.')  // User ko alert karo
+      console.error('Error processing Amazon label:', error)  // Log the error
+      alert('Failed to connect to processing backend. Check API endpoint.')  // Alert the user
     } finally {
-      setIsProcessing(false)  // Processing state off karo
+      setIsProcessing(false)  // Disable the processing state
     }
   }
 
-  // Batch download - sab Amazon PDFs ko process karke ek single PDF me merge karne wala function
+  // Batch download - process all Amazon PDFs and merge them into one PDF
   async function downloadAllAmazon() {
-    if (rows.length === 0) return  // Koi file nahi hai
-    setIsProcessing(true)  // Processing state on karo
+    if (rows.length === 0) return  // Return when there are no files
+    setIsProcessing(true)  // Enable the processing state
     try {
-      // Agar sirf ek file hai to usse directly download karo
+      // Download the file directly when there is only one
       if (rows.length === 1) {
         await downloadAmazon()
         return
       }
 
-      // PDF merging ke liye pdf-lib use karo
+      // Use pdf-lib to merge the PDFs
       const { PDFDocument } = await import('pdf-lib')
-      const mergedPdf = await PDFDocument.create()  // Naya PDF document create karo
+      const mergedPdf = await PDFDocument.create()  // Create a new PDF document
 
-      // Har unique physical PDF ko sirf ek baar process karo.
+      // Process each unique physical PDF only once.
       const uniqueRows: AmazonQueueRow[] = []
       const seenFiles = new Set<File>()
       for (const row of rows) {
@@ -444,67 +444,67 @@ export default function Page() {
       for (const row of uniqueRows) {
         try {
           const formData = new FormData()
-          formData.append('file', row.file)  // PDF file add karo
+          formData.append('file', row.file)  // Add the PDF file
           if (row.productCode) {
-            formData.append('sku_code', row.productCode)  // Product code/SKU add karo
+            formData.append('sku_code', row.productCode)  // Add the product code/SKU
           }
 
-          // Backend API ko POST request bhejo
+          // Send a POST request to the backend API
           const response = await fetch(`${API_BASE_URL}/api/process-amazon`, {
             method: 'POST',
             body: formData,
           })
 
           if (response.ok) {
-            const blob = await response.blob()  // Response ko blob me convert karo
-            const arrayBuffer = await blob.arrayBuffer()  // Blob ko ArrayBuffer me convert karo
-            const pdf = await PDFDocument.load(arrayBuffer)  // PDF ko load karo
-            const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices())  // Pages copy karo
-            copiedPages.forEach((page) => mergedPdf.addPage(page))  // Merged PDF me pages add karo
+            const blob = await response.blob()  // Convert the response to a blob
+            const arrayBuffer = await blob.arrayBuffer()  // Convert the blob to an ArrayBuffer
+            const pdf = await PDFDocument.load(arrayBuffer)  // Load the PDF
+            const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices())  // Copy the pages
+            copiedPages.forEach((page) => mergedPdf.addPage(page))  // Add pages to the merged PDF
           }
         } catch (err) {
           console.error(`Error processing ${row.fileName}:`, err)
         }
       }
 
-      // Merged PDF ko download karo
-      const mergedPdfBytes = await mergedPdf.save()  // PDF ko bytes me save karo
+      // Download the merged PDF
+      const mergedPdfBytes = await mergedPdf.save()  // Save the PDF as bytes
       const mergedPdfBuffer = new ArrayBuffer(mergedPdfBytes.byteLength)
       new Uint8Array(mergedPdfBuffer).set(mergedPdfBytes)
-      const mergedBlob = new Blob([mergedPdfBuffer], { type: 'application/pdf' })  // Blob banao
-      downloadBlob(mergedBlob, `amazon-labels-merged-${new Date().getTime()}.pdf`)  // Download karo
+      const mergedBlob = new Blob([mergedPdfBuffer], { type: 'application/pdf' })  // Create a blob
+      downloadBlob(mergedBlob, `amazon-labels-merged-${new Date().getTime()}.pdf`)  // Download the result
     } catch (error) {
-      console.error('Error in batch processing:', error)  // Error log karo
-      alert('Failed to merge PDFs. Make sure all files processed successfully.')  // User ko alert karo
+      console.error('Error in batch processing:', error)  // Log the error
+      alert('Failed to merge PDFs. Make sure all files processed successfully.')  // Alert the user
     } finally {
-      setIsProcessing(false)  // Processing state off karo
+      setIsProcessing(false)  // Disable the processing state
     }
   }
 
-  // Manual Flipkart data update karne wala function
+  // Update Flipkart data manually
   function handleManualFlipkartUpdate() {
-    if (!selectedFlipkart) return  // Selected label check karo
+    if (!selectedFlipkart) return  // Return when no label is selected
     setFlipkartRows((items) =>
       items.map((item) =>
-        item.id === selectedFlipkart.id  // Selected item ko find karo
-          ? {  // Usko update karo
+        item.id === selectedFlipkart.id  // Find the selected item
+          ? {  // Update it
               ...item,
-              consignmentId: manualConsignment || item.consignmentId,  // Manual value ya existing
-              boxId: manualBox || item.boxId,  // Manual value ya existing
-              status: manualConsignment && manualBox ? 'processed' : item.status,  // Dono filled ho to processed
-              message: manualConsignment && manualBox ? undefined : item.message,  // Error message clear karo
+              consignmentId: manualConsignment || item.consignmentId,  // Use the manual or existing value
+              boxId: manualBox || item.boxId,  // Use the manual or existing value
+              status: manualConsignment && manualBox ? 'processed' : item.status,  // Mark as processed when both are filled
+              message: manualConsignment && manualBox ? undefined : item.message,  // Clear the error message
             }
           : item  // Baki items unchanged
       )
     )
   }
 
-  // Amazon aur Flipkart mode ke beech switch karne wala function
+  // Switch between Amazon and Flipkart modes
   function switchMode(next: ProcessingMode) {
-    setMode(next)  // New mode set karo
-    setFlipkartRows([])  // Flipkart data clear karo
-    setRows(next === 'amazon' ? [] : [])  // Amazon demo data ya empty
-    setSelectedId(next === 'amazon' ? 'demo-1' : '')  // Selection reset karo
+    setMode(next)  // Set the new mode
+    setFlipkartRows([])  // Clear Flipkart data
+    setRows(next === 'amazon' ? [] : [])  // Clear Amazon data
+    setSelectedId(next === 'amazon' ? 'demo-1' : '')  // Reset the selection
   }
 
   return (

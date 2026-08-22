@@ -1,22 +1,21 @@
 # ============================================
 # Flipkart PDF Crop Module
-# Ye module flipkart.py ke rearrange kiye hue PDF ko leta hai
-# aur har label ko apne alag page par crop karta hai, chaaron
-# taraf white space padding ke saath.
+# This module takes the rearranged PDF from flipkart.py
+# and crops each label onto its own page with white-space padding
+# on all sides.
 #
-# flipkart.py ko is file mein edit nahi kiya gaya - hum bas uske
-# already-tested card-detection helpers (_find_label_bands) reuse
-# kar rahe hain, taaki crop bilkul wahi boundary use kare jo
-# flipkart.py khud "card" maanta hai.
+# flipkart.py is not edited here - we only reuse its already-tested
+# card-detection helper (_find_label_bands), so the crop uses exactly
+# the same boundary that flipkart.py considers a "card".
 # ============================================
 
 import io
 
-import pymupdf  # PyMuPDF - PDF manipulation ke liye
+import pymupdf  # PyMuPDF - PDF manipulation
 
 from services.flipkart import _find_label_bands
 
-DEFAULT_PADDING = 14.0  # points (~5mm) white space har side par
+DEFAULT_PADDING = 14.0  # points (~5mm) of white space on each side
 
 
 def crop_flipkart_pdf(
@@ -24,21 +23,21 @@ def crop_flipkart_pdf(
     padding: float = DEFAULT_PADDING,
 ) -> io.BytesIO:
     """
-    Har 2-up Flipkart sheet ko individual label pages mein split karta hai.
+    Split each 2-up Flipkart sheet into individual label pages.
 
     Args:
-        contents: rearranged PDF ke bytes (flipkart.process_flipkart_pdf ka output).
-        padding: har label page ke chaaron taraf kitna white space chahiye (points mein).
+        contents: Bytes from the rearranged PDF (the output of flipkart.process_flipkart_pdf).
+        padding: Amount of white space around each label page, in points.
 
     Returns:
-        BytesIO stream jisme final PDF hai - ek label per page, padding ke saath.
+        A BytesIO stream containing the final PDF, with one padded label per page.
     """
     doc = pymupdf.open(stream=contents, filetype="pdf")
     cropped = pymupdf.open()
 
     for page in doc:
-        # flipkart.py wahi function use karta hai apne redraw ke liye - hum
-        # bhi wahi bands lete hain taaki crop aur redraw hamesha match karein.
+        # flipkart.py uses the same function for redrawing; use the same
+        # bands here so the crop and redraw always match.
         bands = _find_label_bands(page)
 
         for band in bands:
@@ -50,8 +49,8 @@ def crop_flipkart_pdf(
 
             new_page = cropped.new_page(width=new_width, height=new_height)
 
-            # Label ko naye page ke beech mein rakho, chaaron taraf padding
-            # ke saath (naya page by default plain white hota hai).
+            # Place the label in the center of the new page with padding
+            # on all sides (new pages are plain white by default).
             target_rect = pymupdf.Rect(
                 padding,
                 padding,
