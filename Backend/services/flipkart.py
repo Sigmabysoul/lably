@@ -16,7 +16,7 @@ from PIL import Image
 # Regex patterns - used to find specific text in the PDF
 BOX_ID_PATTERN = re.compile(r"fk_mp_\d+_\d+")  # Pattern for finding the Box ID
 CONSIGNMENT_ID_PATTERN = re.compile(r"fk_mp_\d+(?!_\d)")  # Consignment ID pattern
-# Item count pattern, such as [1 of 5]
+COUNT_PATTERN = re.compile(r"\[\s*\d+\s+of\s+\d+\s*\]")  # Item count pattern, such as [1 of 5]
 
 # Colors - defined in RGB format
 NAVY = (0.08, 0.10, 0.35)  # Navy - for text and borders

@@ -367,8 +367,10 @@ export default function Page() {
       // Prepare form data for the API
       const formData = new FormData()
       formData.append('file', flipkartFile)  // Add the PDF file
-      if (manualBox) formData.append('box_id', manualBox)  // Add the manual Box ID when provided
-      if (manualConsignment) formData.append('consignment_id', manualConsignment)  // Add the manual Consignment ID when provided
+      const boxId = manualBox || flipkartRows[0]?.boxId
+      const consignmentId = manualConsignment || flipkartRows[0]?.consignmentId
+      if (boxId) formData.append('box_id', boxId)  // Add the detected or manual Box ID
+      if (consignmentId) formData.append('consignment_id', consignmentId)  // Add the detected or manual Consignment ID
 
       // Send a POST request to the backend API
       const response = await fetch(`${API_BASE_URL}/api/process-flipkart`, {
@@ -376,13 +378,22 @@ export default function Page() {
         body: formData,
       })
 
-      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Check for errors
+      if (!response.ok) {
+        let detail = ''
+        try {
+          const body = await response.json()
+          detail = typeof body.detail === 'string' ? `: ${body.detail}` : ''
+        } catch {
+          // Keep the status when the server does not return JSON.
+        }
+        throw new Error(`Server returned ${response.status}${detail}`)
+      }
 
       const blob = await response.blob()  // Convert the response to a blob
       downloadBlob(blob, `flipkart-modified-${flipkartFile.name}`)  // Download the result
     } catch (error) {
       console.error('Error processing Flipkart label:', error)  // Log the error
-      alert('Failed to connect to processing backend. Check API endpoint.')  // Alert the user
+      alert(`Failed to process Flipkart label: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsProcessing(false)  // Disable the processing state
     }
@@ -417,7 +428,7 @@ export default function Page() {
       setIsProcessing(false)  // Disable the processing state
     }
   }
-
+ 
   // Batch download - process all Amazon PDFs and merge them into one PDF
   async function downloadAllAmazon() {
     if (rows.length === 0) return  // Return when there are no files
