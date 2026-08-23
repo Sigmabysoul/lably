@@ -2,7 +2,7 @@ import unittest
 
 import pymupdf
 
-from services.crop import crop_flipkart_pdf
+from Backend.services.crop import crop_flipkart_pdf
 
 
 class CropValidationTest(unittest.TestCase):

@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from services.amazon import process_amazon_pdf
-from services.flipkart import process_flipkart_pdf
-from services.crop import crop_flipkart_pdf
+from Backend.services.amazon import process_amazon_pdf
+from Backend.services.flipkart import process_flipkart_pdf
+from Backend.services.crop import crop_flipkart_pdf
 
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 ALLOWED_ORIGINS = [

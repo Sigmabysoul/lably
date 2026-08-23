@@ -13,7 +13,7 @@ import io
 
 import pymupdf  # PyMuPDF - PDF manipulation
 
-from services.flipkart import _find_label_bands
+from Backend.services.flipkart import _find_label_bands
 
 DEFAULT_PADDING = 14.0  # points (~5mm) of white space on each side
 

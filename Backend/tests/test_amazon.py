@@ -4,7 +4,7 @@ import unittest
 from pypdf import PdfReader
 from reportlab.pdfgen import canvas
 
-from services.amazon import extract_sku_and_qty_from_text, process_amazon_pdf
+from Backend.services.amazon import extract_sku_and_qty_from_text, process_amazon_pdf
 
 
 def make_pdf(page_count: int = 4) -> bytes:

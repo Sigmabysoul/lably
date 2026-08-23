@@ -1,7 +1,7 @@
 import inspect
 import unittest
 
-from services.flipkart import process_flipkart_pdf
+from Backend.services.flipkart import process_flipkart_pdf
 
 
 class FlipkartProcessorSignatureTest(unittest.TestCase):

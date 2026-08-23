@@ -8,19 +8,6 @@ const nextConfig = {
     '10.173.198.133',
     '10.41.24.133',
   ],
-  async rewrites() {
-    const defaultBackendUrl =
-      process.env.NODE_ENV === 'production'
-        ? 'https://lably-backend-ejip.onrender.com'
-        : 'http://127.0.0.1:8000'
-    const backendUrl = (process.env.BACKEND_URL || defaultBackendUrl).replace(/\/$/, '')
-    return [
-      {
-        source: '/backend-api/:path*',
-        destination: `${backendUrl}/:path*`,
-      },
-    ]
-  },
 };
 
 export default nextConfig;

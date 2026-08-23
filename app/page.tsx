@@ -43,9 +43,8 @@ function createId(): string {
 }
 
 // Backend API base URL (from the environment or the default)
-// Use the same-origin Next.js proxy by default. This avoids CORS failures and
-// makes the app work when opened from another device on the local network.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/backend-api'
+// FastAPI is deployed as a same-origin Vercel Python Function under `/api`.
+const API_BASE_URL = ''
 
 async function getResponseError(response: Response) {
   try {
