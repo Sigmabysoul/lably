@@ -75,15 +75,19 @@ def extract_sku_and_qty_from_text(text: str) -> Tuple[Optional[str], Optional[st
 def process_amazon_pdf(
     contents: bytes,
     filename: str,
-    sku_code: Optional[str] = None
+    sku_code: Optional[str] = None,
+    pair_index: Optional[int] = None,
 ) -> io.BytesIO:
     reader = PdfReader(io.BytesIO(contents))
     writer = PdfWriter()
 
     total_pages = len(reader.pages)
 
-    # Step through the PDF strictly in pairs of 2 pages (0 & 1, 2 & 3, 4 & 5, etc.)
-    for i in range(0, total_pages, 2):
+    if pair_index is not None and (pair_index < 0 or pair_index * 2 >= total_pages):
+        raise ValueError("The requested label pair does not exist in this PDF.")
+
+    pair_starts = [pair_index * 2] if pair_index is not None else range(0, total_pages, 2)
+    for i in pair_starts:
         shipping_page = reader.pages[i]
 
         # Extract text exclusively from the 2nd page of the current pair (the invoice label)
@@ -99,11 +103,8 @@ def process_amazon_pdf(
         # Parse unique SKU and Quantity for THIS specific invoice page
         parsed_sku, parsed_qty = extract_sku_and_qty_from_text(invoice_text)
 
-        # Override sku_code only if provided for a single-label PDF
-        final_sku = sku_code if (sku_code and total_pages <= 2) else (parsed_sku if parsed_sku else "UNKNOWN-SKU")
+        final_sku = sku_code or parsed_sku or "UNKNOWN-SKU"
         final_qty = parsed_qty if parsed_qty else "1"
-
-        print(f"[AMAZON] Pair {(i // 2) + 1} (Pages {i+1}-{i+2}) -> SKU: {final_sku} | QTY: {final_qty}")
 
         # Create overlay canvas for the 1st page of the current pair (the shipping label)
         w = float(shipping_page.mediabox.width)
@@ -133,10 +134,13 @@ def process_amazon_pdf(
 
         packet.seek(0)
         overlay = PdfReader(packet)
-        shipping_page.merge_page(overlay.pages[0])
 
-        # Write modified shipping page followed by its original invoice page
-        writer.add_page(shipping_page)
+        # Attach the page to the writer before replacing its contents. This is
+        # the supported pypdf mutation order and avoids shared-reader side effects.
+        output_shipping_page = writer.add_page(shipping_page)
+        output_shipping_page.merge_page(overlay.pages[0])
+
+        # Write the original invoice page after its modified shipping page.
         if i + 1 < total_pages:
             writer.add_page(reader.pages[i + 1])
 

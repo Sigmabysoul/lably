@@ -6,7 +6,7 @@
 
 import io
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pymupdf  # PyMuPDF - PDF manipulation
 import barcode
@@ -266,6 +266,7 @@ def _process_label_band(
     band: "pymupdf.Rect",        # Label band to process
     box_id_override: Optional[str],  # Manual Box ID override
     consignment_id: str,         # Consignment ID to write
+    from_address: Optional[str] = None,
 ) -> None:
     # Process a label band.
     # Add barcodes and information for the Box ID and Consignment ID.
@@ -325,11 +326,23 @@ def _process_label_band(
     # Keep 3pt inside the border so it is not clipped
     cons_bottom = band.y1 - 3
     consignment_rect = pymupdf.Rect(consignment_left, cons_top, band.x1 - 3, cons_bottom)
+    address_rect = pymupdf.Rect(band.x0 + 8, from_caption.y0 - 2, divider_x - 8, band.y1 - 3)
 
     # Cover the old content with white redaction areas
     page.add_redact_annot(box_rect, fill=(1, 1, 1))
     page.add_redact_annot(consignment_rect, fill=(1, 1, 1))
+    if from_address and address_rect.width > 40 and address_rect.height > 20:
+        page.add_redact_annot(address_rect, fill=(1, 1, 1))
     page.apply_redactions()  # Apply the redactions
+
+    if from_address and address_rect.width > 40 and address_rect.height > 20:
+        page.insert_textbox(
+            address_rect,
+            f"From:\n{from_address.strip()}",
+            fontsize=8.0,
+            fontname="helv",
+            lineheight=1.2,
+        )
 
     # ============================================
     # Create the Box ID box
@@ -464,7 +477,8 @@ def process_flipkart_pdf(
     contents: bytes,                           # PDF file bytes
     box_id: Optional[str] = None,             # Optional: manually provided Box ID
     consignment_id: Optional[str] = None,     # Optional: manually provided Consignment ID
-    from_address: Optional[str] = None,       # Optional: address information (currently unused)
+    from_address: Optional[str] = None,
+    label_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> io.BytesIO:
     # ============================================
     # Main function - process a Flipkart PDF.
@@ -493,16 +507,19 @@ def process_flipkart_pdf(
         # Find label bands on the page
         bands = _find_label_bands(page)
         
-        for band in bands:
+        for band_index, band in enumerate(bands):
+            override = (label_overrides or {}).get(f"{page.number}:{band_index}", {})
             # Use the Box ID when there is only one band and one was provided
-            band_box_id = box_id if (box_id and len(bands) == 1) else None
+            band_box_id = override.get("box_id") or (box_id if (box_id and len(bands) == 1) else None)
+            band_consignment_id = override.get("consignment_id") or consignment_id
             
             # Process the label band and add the barcode and information
             _process_label_band(
                 page,
                 band,
                 band_box_id,
-                consignment_id,
+                band_consignment_id,
+                from_address,
             )
 
     # Save the modified PDF

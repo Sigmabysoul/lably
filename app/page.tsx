@@ -2,7 +2,7 @@
 'use client'
 
 // Import React hooks
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Boxes,
   Download,
@@ -10,7 +10,6 @@ import {
   FileText,
   FolderOpen,
   PackageCheck,
-  Plus,
   RotateCcw,
   ScanLine,
   Settings2,
@@ -24,7 +23,6 @@ import {
   downloadBlob,
   extractFlipkartLabels,
   extractOrderNumber,
-  extractProductCandidates,
   type FlipkartLabel,
   type LabelStatus,
   type ProcessingMode,
@@ -45,13 +43,37 @@ function createId(): string {
 }
 
 // Backend API base URL (from the environment or the default)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Use the same-origin Next.js proxy by default. This avoids CORS failures and
+// makes the app work when opened from another device on the local network.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/backend-api'
+
+async function getResponseError(response: Response) {
+  try {
+    const body = (await response.json()) as { detail?: unknown }
+    if (typeof body.detail === 'string') return body.detail
+  } catch {
+    // Fall back to the HTTP status for non-JSON responses.
+  }
+  return `Server returned ${response.status}`
+}
+
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
+  try {
+    return await fetch(input, init)
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return fetch(input, init)
+  }
+}
 
 // Demo data - loaded when the app starts for the first time
 
 interface FlipkartPanelProps {
-  labels: FlipkartLabel[]
-  selected?: FlipkartLabel
+  labels: FlipkartQueueRow[]
+  selected?: FlipkartQueueRow
+  selectedId: string
+  setSelectedId: (id: string) => void
   manualConsignment: string
   manualBox: string
   setManualConsignment: (val: string) => void
@@ -66,7 +88,6 @@ interface FlipkartPanelProps {
 interface AmazonPanelProps {
   rows: AmazonQueueRow[]
   selected?: AmazonQueueRow
-  selectedId: string
   setSelectedId: (id: string) => void
   onDownload: () => void
   onDownloadAll: () => void
@@ -86,34 +107,38 @@ interface AmazonQueueRow {
   productCode: string
   candidates: string[]
   status: LabelStatus
-  originalUrl?: string
   message?: string
   amazonItems: AmazonItem[]
+  pairIndex: number
+}
+
+interface FlipkartQueueRow extends FlipkartLabel {
+  file: File
+  fileName: string
 }
 
 export default function Page() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<ProcessingMode>('amazon')
   const [rows, setRows] = useState<AmazonQueueRow[]>([])
-  const [flipkartRows, setFlipkartRows] = useState<FlipkartLabel[]>([])
-  const [flipkartFile, setFlipkartFile] = useState<File | null>(null)
-  const [selectedId, setSelectedId] = useState('demo-1')
+  const [flipkartRows, setFlipkartRows] = useState<FlipkartQueueRow[]>([])
+  const [selectedId, setSelectedId] = useState('')
+  const [selectedFlipkartId, setSelectedFlipkartId] = useState('')
   const [previewMode, setPreviewMode] = useState<'original' | 'modified'>('modified')
   const [manualConsignment, setManualConsignment] = useState('')
   const [manualBox, setManualBox] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
 
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0]
-  const selectedFlipkart = flipkartRows[0]
+  const selectedFlipkart =
+    flipkartRows.find((row) => row.id === selectedFlipkartId) ?? flipkartRows[0]
 
-  // Cleanup object URLs cleanly to avoid memory leaks
-  useEffect(() => {
-    return () => {
-      rows.forEach((row) => {
-        if (row.originalUrl) URL.revokeObjectURL(row.originalUrl)
-      })
-    }
-  }, [rows])
+  function selectFlipkart(id: string) {
+    const label = flipkartRows.find((row) => row.id === id)
+    setSelectedFlipkartId(id)
+    setManualConsignment(label?.consignmentId ?? '')
+    setManualBox(label?.boxId ?? '')
+  }
 
   const stats = useMemo(
     () => ({
@@ -126,7 +151,10 @@ export default function Page() {
         mode === 'flipkart'
           ? flipkartRows.filter((row) => row.status === 'review').length
           : rows.filter((row) => row.status === 'review').length,
-      failed: rows.filter((row) => row.status === 'failed').length,
+      failed:
+        mode === 'flipkart'
+          ? flipkartRows.filter((row) => row.status === 'failed').length
+          : rows.filter((row) => row.status === 'failed').length,
     }),
     [mode, rows, flipkartRows]
   )
@@ -143,7 +171,10 @@ export default function Page() {
   async function readAmazon(file: File): Promise<AmazonQueueRow[]> {
     try {
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
+        import.meta.url,
+      ).toString()
 
       const pdf = await pdfjs.getDocument({
         data: new Uint8Array(await file.arrayBuffer()),
@@ -219,7 +250,6 @@ export default function Page() {
         items.push(extractAmazonItem(invoiceText))
       }
 
-      const fileUrl = URL.createObjectURL(file)
       const orderNumber = extractOrderNumber(file.name) || 'N/A'
       const rowsForFile: AmazonQueueRow[] = items.map((item, index) => ({
         id: createId(),
@@ -229,8 +259,8 @@ export default function Page() {
         productCode: item.productCode,
         candidates: [item.productCode],
         status: 'processed',
-        originalUrl: fileUrl,
         amazonItems: [item],
+        pairIndex: index,
       }))
 
       if (!rowsForFile.length) {
@@ -243,8 +273,8 @@ export default function Page() {
           candidates: [],
           status: 'failed',
           message: 'Could not read this PDF.',
-          originalUrl: fileUrl,
           amazonItems: [],
+          pairIndex: 0,
         })
       }
 
@@ -262,6 +292,7 @@ export default function Page() {
           status: 'failed',
           message: 'Could not read this PDF.',
           amazonItems: [],
+          pairIndex: 0,
         },
       ]
     }
@@ -270,12 +301,15 @@ export default function Page() {
   // Read and parse a Flipkart PDF file
   async function readFlipkart(
     file: File
-  ): Promise<{ file: File; extracted: FlipkartLabel[] }> {
+  ): Promise<FlipkartQueueRow[]> {
     try {
       // Load the PDF.js library dynamically
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
       // Set the worker script explicitly to avoid Next.js runtime issues
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
+        import.meta.url,
+      ).toString()
 
       // Load the PDF into memory from the file bytes
       const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
@@ -288,12 +322,15 @@ export default function Page() {
         const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')  // Join the text
         extracted.push(...extractFlipkartLabels(text, pageIndex))  // Extract and add labels
       }
-      return { file, extracted }
+      return extracted.map((label) => ({
+        ...label,
+        id: `${createId()}-${label.id}`,
+        file,
+        fileName: file.name,
+      }))
     } catch (err) {
       console.error('Failed parsing Flipkart PDF:', err)
-      return {
-        file,
-        extracted: [
+      return [
           {
             id: createId(),
             pageIndex: 0,
@@ -303,9 +340,10 @@ export default function Page() {
             labelNumber: '',
             status: 'review',
             message: 'Unable to parse PDF.',
+            file,
+            fileName: file.name,
           },
-        ],
-      }
+        ]
     }
   }
 
@@ -321,13 +359,11 @@ export default function Page() {
     try {
       if (mode === 'flipkart') {
         // Flipkart mode: parse all files
-        const all: FlipkartLabel[] = []
-        for (const file of pdfs) {
-          const res = await readFlipkart(file)  // Parse each file
-          all.push(...res.extracted)  // Collect extracted labels
-        }
-        setFlipkartFile(pdfs[0])  // Store the first file
+        const all = (await Promise.all(pdfs.map(readFlipkart))).flat()
         setFlipkartRows(all)  // Set all labels
+        setSelectedFlipkartId(all[0]?.id ?? '')
+        setManualConsignment(all[0]?.consignmentId ?? '')
+        setManualBox(all[0]?.boxId ?? '')
       } else {
         // Amazon mode: parse each PDF and create a separate UI row for every two-page pair.
         const parsedFiles = await Promise.all(pdfs.map(readAmazon))
@@ -359,43 +395,57 @@ export default function Page() {
     }
   }
 
-  // Process a Flipkart PDF through the backend and download it
+  async function processFlipkartFile(file: File, label?: FlipkartQueueRow) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const fileLabels = flipkartRows.filter((row) => row.file === file)
+    const overrides = Object.fromEntries(
+      fileLabels.map((row) => [
+        `${row.pageIndex}:${row.half === 'top' ? 0 : 1}`,
+        { box_id: row.boxId, consignment_id: row.consignmentId },
+      ]),
+    )
+    formData.append('label_overrides', JSON.stringify(overrides))
+    if (label?.consignmentId) formData.append('consignment_id', label.consignmentId)
+    const response = await fetchWithRetry(`${API_BASE_URL}/api/process-flipkart`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!response.ok) throw new Error(await getResponseError(response))
+    return response.blob()
+  }
+
   async function downloadFlipkart() {
-    if (!flipkartFile) return  // Return when there is no file
-    setIsProcessing(true)  // Enable the processing state
+    if (!flipkartRows.length) return
+    setIsProcessing(true)
     try {
-      // Prepare form data for the API
-      const formData = new FormData()
-      formData.append('file', flipkartFile)  // Add the PDF file
-      const boxId = manualBox || flipkartRows[0]?.boxId
-      const consignmentId = manualConsignment || flipkartRows[0]?.consignmentId
-      if (boxId) formData.append('box_id', boxId)  // Add the detected or manual Box ID
-      if (consignmentId) formData.append('consignment_id', consignmentId)  // Add the detected or manual Consignment ID
-
-      // Send a POST request to the backend API
-      const response = await fetch(`${API_BASE_URL}/api/process-flipkart`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        let detail = ''
-        try {
-          const body = await response.json()
-          detail = typeof body.detail === 'string' ? `: ${body.detail}` : ''
-        } catch {
-          // Keep the status when the server does not return JSON.
+      const uniqueFiles = [...new Set(flipkartRows.map((row) => row.file))]
+      const blobs = await Promise.all(
+        uniqueFiles.map((file) => processFlipkartFile(file, flipkartRows.find((row) => row.file === file))),
+      )
+      if (blobs.length === 1) {
+        downloadBlob(blobs[0], `flipkart-modified-${uniqueFiles[0].name}`)
+      } else {
+        const { PDFDocument } = await import('pdf-lib')
+        const merged = await PDFDocument.create()
+        for (const blob of blobs) {
+          const source = await PDFDocument.load(await blob.arrayBuffer())
+          const pages = await merged.copyPages(source, source.getPageIndices())
+          pages.forEach((page) => merged.addPage(page))
         }
-        throw new Error(`Server returned ${response.status}${detail}`)
+        const mergedBytes = await merged.save()
+        const mergedBuffer = new ArrayBuffer(mergedBytes.byteLength)
+        new Uint8Array(mergedBuffer).set(mergedBytes)
+        downloadBlob(
+          new Blob([mergedBuffer], { type: 'application/pdf' }),
+          'flipkart-labels-merged.pdf',
+        )
       }
-
-      const blob = await response.blob()  // Convert the response to a blob
-      downloadBlob(blob, `flipkart-modified-${flipkartFile.name}`)  // Download the result
     } catch (error) {
-      console.error('Error processing Flipkart label:', error)  // Log the error
-      alert(`Failed to process Flipkart label: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Error processing Flipkart labels:', error)
+      alert(error instanceof Error ? error.message : 'Unable to process Flipkart labels.')
     } finally {
-      setIsProcessing(false)  // Disable the processing state
+      setIsProcessing(false)
     }
   }
 
@@ -407,17 +457,18 @@ export default function Page() {
       // Prepare form data for the API
       const formData = new FormData()
       formData.append('file', selected.file)  // Add the PDF file
+      formData.append('pair_index', String(selected.pairIndex))
       if (selected.productCode) {
         formData.append('sku_code', selected.productCode)  // Add the product code/SKU
       }
 
       // Send a POST request to the backend API
-      const response = await fetch(`${API_BASE_URL}/api/process-amazon`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}/api/process-amazon`, {
         method: 'POST',
         body: formData,
       })
 
-      if (!response.ok) throw new Error(`Server returned ${response.status}`)  // Check for errors
+      if (!response.ok) throw new Error(await getResponseError(response))
 
       const blob = await response.blob()  // Convert the response to a blob
       downloadBlob(blob, `modified-${selected.file.name}`)  // Download the result
@@ -444,39 +495,34 @@ export default function Page() {
       const { PDFDocument } = await import('pdf-lib')
       const mergedPdf = await PDFDocument.create()  // Create a new PDF document
 
-      // Process each unique physical PDF only once.
-      const uniqueRows: AmazonQueueRow[] = []
-      const seenFiles = new Set<File>()
-      for (const row of rows) {
-        if (seenFiles.has(row.file)) continue
-        seenFiles.add(row.file)
-        uniqueRows.push(row)
-      }
-      for (const row of uniqueRows) {
+      const failures: string[] = []
+      for (const row of rows.filter((item) => item.status === 'processed')) {
         try {
           const formData = new FormData()
           formData.append('file', row.file)  // Add the PDF file
+          formData.append('pair_index', String(row.pairIndex))
           if (row.productCode) {
             formData.append('sku_code', row.productCode)  // Add the product code/SKU
           }
 
           // Send a POST request to the backend API
-          const response = await fetch(`${API_BASE_URL}/api/process-amazon`, {
+          const response = await fetchWithRetry(`${API_BASE_URL}/api/process-amazon`, {
             method: 'POST',
             body: formData,
           })
 
-          if (response.ok) {
-            const blob = await response.blob()  // Convert the response to a blob
-            const arrayBuffer = await blob.arrayBuffer()  // Convert the blob to an ArrayBuffer
-            const pdf = await PDFDocument.load(arrayBuffer)  // Load the PDF
-            const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices())  // Copy the pages
-            copiedPages.forEach((page) => mergedPdf.addPage(page))  // Add pages to the merged PDF
-          }
+          if (!response.ok) throw new Error(await getResponseError(response))
+          const pdf = await PDFDocument.load(await (await response.blob()).arrayBuffer())
+          const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices())
+          copiedPages.forEach((page) => mergedPdf.addPage(page))
         } catch (err) {
           console.error(`Error processing ${row.fileName}:`, err)
+          failures.push(row.fileName)
         }
       }
+
+      if (mergedPdf.getPageCount() === 0) throw new Error('No labels were processed successfully.')
+      if (failures.length) throw new Error(`Failed to process: ${failures.join(', ')}`)
 
       // Download the merged PDF
       const mergedPdfBytes = await mergedPdf.save()  // Save the PDF as bytes
@@ -514,8 +560,9 @@ export default function Page() {
   function switchMode(next: ProcessingMode) {
     setMode(next)  // Set the new mode
     setFlipkartRows([])  // Clear Flipkart data
-    setRows(next === 'amazon' ? [] : [])  // Clear Amazon data
-    setSelectedId(next === 'amazon' ? 'demo-1' : '')  // Reset the selection
+    setRows([])
+    setSelectedId('')
+    setSelectedFlipkartId('')
   }
 
   return (
@@ -654,6 +701,8 @@ export default function Page() {
           <FlipkartPanel
             labels={flipkartRows}
             selected={selectedFlipkart}
+            selectedId={selectedFlipkartId}
+            setSelectedId={selectFlipkart}
             manualConsignment={manualConsignment}
             manualBox={manualBox}
             setManualConsignment={setManualConsignment}
@@ -668,7 +717,6 @@ export default function Page() {
           <AmazonPanel
             rows={rows}
             selected={selected}
-            selectedId={selectedId}
             setSelectedId={setSelectedId}
             onDownload={downloadAmazon}
             onDownloadAll={downloadAllAmazon}
@@ -715,6 +763,8 @@ const Status = ({ status }: { status: LabelStatus }) => {
 function FlipkartPanel({
   labels,
   selected,
+  selectedId,
+  setSelectedId,
   manualConsignment,
   manualBox,
   setManualConsignment,
@@ -755,8 +805,13 @@ function FlipkartPanel({
             </thead>
             <tbody className="divide-y divide-border">
               {labels.map((label) => (
-                <tr key={label.id} className="hover:bg-muted/30">
+                <tr
+                  key={label.id}
+                  onClick={() => setSelectedId(label.id)}
+                  className={`cursor-pointer hover:bg-muted/30 ${selectedId === label.id ? 'bg-primary/[0.045]' : ''}`}
+                >
                   <td className="px-5 py-4 font-mono text-xs">
+                    <span className="block font-sans font-medium">{label.fileName}</span>
                     Page {label.pageIndex + 1} · {label.half} {label.labelNumber}
                   </td>
                   <td className="px-5 py-4 font-mono text-xs">{label.boxId || 'Enter manually'}</td>
@@ -890,7 +945,6 @@ function FlipkartPanel({
 function AmazonPanel({
   rows,
   selected,
-  selectedId,
   setSelectedId,
   onDownload,
   onDownloadAll,
