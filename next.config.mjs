@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
+
 const nextConfig = {
-  // Move allowedDevOrigins to the top level here:
   allowedDevOrigins: [
     '192.168.1.117:3000',
     '192.168.1.117',
@@ -9,19 +9,29 @@ const nextConfig = {
     '10.41.24.133:3000',
     '10.41.24.133',
   ],
+
   async rewrites() {
-    // `npm run dev` does not run Vercel Python Functions. Proxy API requests
-    // to the local FastAPI process only in plain Next.js development. Vercel
-    // dev and production continue routing `/api/*` to `api/index.py`.
-    if (process.env.NODE_ENV !== 'development' || process.env.VERCEL) return []
+    // Local testing ke time local Python backend use karo.
+    if (process.env.NODE_ENV === 'development' && !process.env.VERCEL) {
+      return [
+        {
+          source: '/api/:path*',
+          destination: 'http://127.0.0.1:8000/api/:path*',
+        },
+      ]
+    }
+
+    // Hosted website par Render backend use hoga.
+    const backendUrl =
+      process.env.BACKEND_URL || 'https://lably-48gg.onrender.com'
 
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:8000/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
       },
     ]
   },
-};
+}
 
-export default nextConfig;
+export default nextConfig
